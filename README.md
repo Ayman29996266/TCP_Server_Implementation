@@ -1,5 +1,5 @@
-# Quantum-safe-encryption
+# TCP Server Implementaion
 
-## To Test the application, compile both the 'server.c' and 'client.c' files. Then open a terminal, and run the server. Then open another terminal and run the client. Then start testing.
----
-## Report any bugs or errors in the Whatsapp group.
+An implementation of a TCP server with security in mind.
+
+Early develpment...
