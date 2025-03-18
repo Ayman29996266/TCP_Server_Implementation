@@ -1,4 +1,3 @@
-src/server
-src/client
-server
-client
+/out/**
+/.vscode
+/.vscode/**

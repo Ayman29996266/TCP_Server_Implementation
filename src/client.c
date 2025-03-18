@@ -1,79 +1,173 @@
 #include <stdio.h>
-#include <fcntl.h>
-#include <errno.h>
-#include <string.h>
-#include <unistd.h>
 #include <stdlib.h>
-#include <arpa/inet.h>
-#include <sys/socket.h>
-/* Libraries needed for the client. */
+#include <string.h>
 
+#define DEFAULT_IP "127.0.0.1"
+#define DEFAULT_PORT 42999
+#define BUFFER_SIZE 1024
+
+#ifdef _WIN32
+    #include <winsock2.h>
+    #include <windows.h>
+    #pragma  comment(lib, "ws2_32.lib")
+    typedef SOCKET socket_t;
+#else
+    #include <unistd.h>
+    #include <arpa/inet.h>
+    typedef int socket_t;
+#endif
+
+
+void close_socket(socket_t *s) {
+    if (*s > 0) {
+        shutdown(*s, SHUT_RDWR);
+        #ifdef _WIN32
+            closesocket(*s);
+        #else
+            close(*s);
+        #endif
+        *s = -1;
+    }
+}
 
 
 int main(int argc, char *argv[]) {
-    
-    /* Create a socket */
-    int client_sockfd = socket(AF_INET, SOCK_STREAM, 0);
-    if (client_sockfd == -1) {                                  // error handling, in case the socket creation failed
-        perror("Error... Couldn't initialize a socket.\n");
-        exit(1);
-    }
-
-
-
-    /* A structure to hold the server address and configuration */
-    char *IP_address = argv[1]? argv[1] : "127.0.0.1";          // IP address can be passed as program argument or defaults to local host
+    socket_t sock;
     struct sockaddr_in server_address;
-    server_address.sin_family       = AF_INET;                  // Set the protocol     (IP)
-    server_address.sin_port         = htons(9000);              // Set the port         (9000)
-    server_address.sin_addr.s_addr  = inet_addr(IP_address);    // Set the IP address   (Local host)
+    char buffer[BUFFER_SIZE];
 
 
+    // initialize windows socket
+    #ifdef _WIN32
+        WSADATA wsa;
+        if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) {
+            printf("Error: Winsock initialization failed\n");
+            return 1;
+        }
+    #endif
 
-    /* Connect the socket to the address */
-    int connection_result = connect(client_sockfd, (struct sockaddr*)&server_address, sizeof(server_address));
-    
-    if (connection_result == -1) {                              // error handling, in case connection failed
-        perror("Error... Couldn't connect to the server.\n");
-        close(client_sockfd);
+
+    /* Get IP and port from command-line args (default: 127.0.0.1:42999) */
+    const char *server_ip = (argc > 1) ? argv[1] : DEFAULT_IP;
+
+    int port = DEFAULT_PORT;
+    if (argc > 2) {
+        char *endptr;
+        long temp = strtol(argv[2], &endptr, 10);
+        if (*endptr == '\0' && temp > 0 && temp <= 65535) {
+            port = (int)temp;
+        } else {
+            fprintf(stderr, "Error: Invalid port number\n");
+            
+            #ifdef _WIN32
+                WSACleanup();           // requiarement for windows sockets
+            #endif
+
+            exit(1);
+        }
+    }
+
+    /* Create socket */
+    sock = socket(AF_INET, SOCK_STREAM, 0);
+    if (sock == -1) {
+        perror("Error: Couldn't create socket");
+
+        #ifdef _WIN32
+            WSACleanup();
+        #endif
+
         exit(1);
     }
 
+   
+    /* Set up server address */
+    memset(&server_address, 0, sizeof(server_address));     // empty buffer
+    server_address.sin_family = AF_INET;                    // for IPv4
+    server_address.sin_port = htons(port);                  // set port
 
+   
+    /* Convert IP address */
+    if (inet_pton(AF_INET, server_ip, &server_address.sin_addr) <= 0) {
+        fprintf(stderr, "Error: Failed to convert IP address '%s'.\n", server_ip);
+        
+        close_socket(& sock);
+        
+        #ifdef _WIN32               // windows compatibility 
+            WSACleanup();
+        #endif
+        exit(1);
+    }
 
-    /* Initiate the communication cycle */
-    char buffer[2048]   = {0};                                  // buffer to store incoming messages
-    char message[2048]  = {0};
-    int  message_length = strlen(message);
+    
+    /* Connect to server */
+    #ifdef _WIN32
+        sockaddr *addr = (sockaddr *) &server_address;
+    #else
+        struct sockaddr *addr = (struct sockaddr *) &server_address;
+    #endif
+
+    if (connect(sock, addr, sizeof(server_address)) == -1) {
+        perror("Error: Connection failed");
+        
+        close_socket(& sock);
+        
+        #ifdef _WIN32               // windows compatibility 
+            WSACleanup();
+        #endif
+        exit(1);
+    }
+
+    printf("Connected to server at %s:%d\n", server_ip, port);
+
+    
+    /* Receive initial message from server */
+    int bytes_received = recv(sock, buffer, BUFFER_SIZE - 1, 0);
+    if (bytes_received > 0) {
+        buffer[bytes_received] = '\0';
+        printf("Server > %s\n", buffer);
+    }
+
+    
+    /* Communication loop */
     while (1) {
-        printf("Enter your message: ");
-        scanf("%s", message);
-        send(client_sockfd, message, message_length, 0);
+        printf("You > ");
+        if (fgets(buffer, BUFFER_SIZE, stdin) == NULL) {
+            printf("\nInput error. Closing connection...\n");
+            break;
+        }
+        
+        
+        
+        /* Remove trailing newline */
+        buffer[strcspn(buffer, "\n")] = 0;
 
-        int bytes_received      = recv(client_sockfd, buffer, 2048 -1, MSG_DONTWAIT);
-        if (bytes_received < 0) {
-            if (errno == EAGAIN || errno == EWOULDBLOCK) {                
-            } else {
-                perror("Error... something wrong happened with 'recv'.");
-                close(client_sockfd);
-                exit(1);
-            }
-        } else if (bytes_received > 0) {
-            buffer[bytes_received]  = '\0';
-            printf("\nServer > %s\n", buffer);
-            // buffer[0] = '\0';
-        } else {
+        
+        /* Exit on user command */
+        if (strcmp(buffer, "exit") == 0) {
+            printf("Closing connection...\n");
             break;
         }
 
-        // handle session closing
-        if (!strcmp(message, "exit") || !strcmp(message, "bye") || !strcmp(message, "close")) {
+        
+        /* Send message to server */
+        send(sock, buffer, strlen(buffer), 0);
+
+        
+        /* Receive server response */
+        bytes_received = recv(sock, buffer, BUFFER_SIZE - 1, 0);
+        if (bytes_received > 0) {
+            buffer[bytes_received] = '\0';
+            printf("Server > %s\n", buffer);
+        } else {
+            printf("Server closed the connection.\n");
             break;
         }
     }
+    
+    close_socket(& sock);
 
-
-    /* Terminate the connection */
-    close(client_sockfd);
+    #ifdef _WIN32
+        WSACleanup();
+    #endif
     return 0;
 }
