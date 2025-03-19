@@ -6,7 +6,7 @@
 #define DEFAULT_PORT 42999
 #define BUFFER_SIZE 1024
 
-#ifdef _WIN32
+#ifdef _WIN32                                                                           // <- windows/Linux compatibility
     #include <winsock2.h>
     #include <windows.h>
     #pragma  comment(lib, "ws2_32.lib")
@@ -18,15 +18,15 @@
 #endif
 
 
-void close_socket(socket_t *s) {
-    if (*s > 0) {
-        shutdown(*s, SHUT_RDWR);
+void close_socket(socket_t *s) {                                                        // <- the function to close sockets is different in windows than in Linux
+    if (*s > 0) {                                                                       // <- check if socket is actually open
+        shutdown(*s, SHUT_RDWR);                                                        // <- stop any ongoing transfer on the socket (optional)
         #ifdef _WIN32
             closesocket(*s);
         #else
             close(*s);
         #endif
-        *s = -1;
+        *s = -1;                                                                        // <- explicitly set the socket to negative value, means closed
     }
 }
 
@@ -37,7 +37,7 @@ int main(int argc, char *argv[]) {
     char buffer[BUFFER_SIZE];
 
 
-    // initialize windows socket
+    /* initialize windows socket */
     #ifdef _WIN32
         WSADATA wsa;
         if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) {
@@ -60,7 +60,7 @@ int main(int argc, char *argv[]) {
             fprintf(stderr, "Error: Invalid port number\n");
             
             #ifdef _WIN32
-                WSACleanup();           // requiarement for windows sockets
+                WSACleanup();                                                           // <- winsock requiarement, before exiting the program (ONLY ONCE)
             #endif
 
             exit(1);
@@ -81,9 +81,9 @@ int main(int argc, char *argv[]) {
 
    
     /* Set up server address */
-    memset(&server_address, 0, sizeof(server_address));     // empty buffer
-    server_address.sin_family = AF_INET;                    // for IPv4
-    server_address.sin_port = htons(port);                  // set port
+    memset(&server_address, 0, sizeof(server_address));                                 // <- empty buffer
+    server_address.sin_family = AF_INET;                                                // <- for IPv4
+    server_address.sin_port = htons(port);                                              // <- set port
 
    
     /* Convert IP address */
@@ -92,7 +92,7 @@ int main(int argc, char *argv[]) {
         
         close_socket(& sock);
         
-        #ifdef _WIN32               // windows compatibility 
+        #ifdef _WIN32
             WSACleanup();
         #endif
         exit(1);
@@ -100,7 +100,7 @@ int main(int argc, char *argv[]) {
 
     
     /* Connect to server */
-    #ifdef _WIN32
+    #ifdef _WIN32                                                                       // different dayatypes in windows and Linux
         sockaddr *addr = (sockaddr *) &server_address;
     #else
         struct sockaddr *addr = (struct sockaddr *) &server_address;
